@@ -1,0 +1,67 @@
+site_name: Claude AI Knowledge Base
+site_description: Internal portal for Claude AI-generated documents, reports, and frameworks
+repo_url: https://github.com/Samriddha11/claude-knowledge-base
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+plugins:
+  - techdocs-core
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.emoji
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Business Value Reviews:
+      - Overview: bvr/index.md
+      - How to Add a BVR: bvr/how-to-add.md
+  - IaCM Documentation:
+      - Overview: iacm/index.md
+      - Well-Architected Framework: iacm/well-architected-framework.md
+      - Best Practices Handbook: iacm/best-practices-handbook.md
+      - Pipeline Patterns: iacm/pipeline-patterns.md
+  - FinOps & CCM Reports:
+      - Overview: finops/index.md
+      - How to Add Reports: finops/how-to-add.md
+  - Best Practices Library:
+      - Overview: best-practices/index.md
+  - Contributing:
+      - How to Add Claude Artifacts: how-to-contribute.md
+      - Claude Prompt Templates: prompt-templates.md
