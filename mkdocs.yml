@@ -54,6 +54,7 @@ nav:
       - How to Add a BVR: bvr/how-to-add.md
   - IaCM Documentation:
       - Overview: iacm/index.md
+      - "6 Pillars Guide (Interactive)": iacm/iacm-waf-6pillars.md
       - Well-Architected Framework: iacm/well-architected-framework.md
       - Best Practices Handbook: iacm/best-practices-handbook.md
       - Pipeline Patterns: iacm/pipeline-patterns.md
