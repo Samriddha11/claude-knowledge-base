@@ -1,0 +1,202 @@
+pipeline:
+  name: Publish Claude Artifact to Knowledge Base
+  identifier: publish_claude_artifact
+  description: >
+    Automates publishing a Claude AI-generated markdown document to the
+    Knowledge Base repository and opens a PR for review.
+  tags:
+    ManagedBy: harness-idp
+    Category: knowledge-base
+  stages:
+    - stage:
+        name: Publish Artifact
+        identifier: publish_artifact
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+
+              - step:
+                  type: Run
+                  name: Validate Inputs
+                  identifier: validate_inputs
+                  spec:
+                    shell: Bash
+                    command: |
+                      echo "=== Publishing Claude Artifact ==="
+                      echo "Title:         <+pipeline.variables.document_title>"
+                      echo "Target folder: <+pipeline.variables.target_folder>"
+                      echo "Source file:   <+pipeline.variables.artifact_path>"
+
+                      # Validate target folder
+                      valid_folders="bvr iacm finops best-practices"
+                      if ! echo "$valid_folders" | grep -qw "<+pipeline.variables.target_folder>"; then
+                        echo "ERROR: target_folder must be one of: $valid_folders"
+                        exit 1
+                      fi
+
+                      # Validate source file exists
+                      if [ ! -f "<+pipeline.variables.artifact_path>" ]; then
+                        echo "ERROR: Source file not found: <+pipeline.variables.artifact_path>"
+                        exit 1
+                      fi
+
+                      echo "Validation passed ✓"
+
+              - step:
+                  type: Run
+                  name: Prepare Document
+                  identifier: prepare_document
+                  spec:
+                    shell: Bash
+                    command: |
+                      SOURCE="<+pipeline.variables.artifact_path>"
+                      FOLDER="<+pipeline.variables.target_folder>"
+                      TITLE="<+pipeline.variables.document_title>"
+                      DATE=$(date +"%b-%Y" | tr '[:upper:]' '[:lower:]')
+                      SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+
+                      TARGET_FILE="docs/${FOLDER}/${SLUG}-${DATE}.md"
+                      echo "TARGET_FILE=${TARGET_FILE}" >> $HARNESS_OUTPUT_FILE
+                      echo "SLUG=${SLUG}" >> $HARNESS_OUTPUT_FILE
+                      echo "DATE=${DATE}" >> $HARNESS_OUTPUT_FILE
+
+                      # Check if frontmatter already exists
+                      if ! head -1 "$SOURCE" | grep -q "^---"; then
+                        echo "Adding frontmatter to document..."
+                        TMPFILE=$(mktemp)
+                        cat > "$TMPFILE" <<FRONTMATTER
+                      ---
+                      title: "${TITLE}"
+                      date: "$(date +'%B %Y')"
+                      category: "${FOLDER}"
+                      author: "Harness Agent"
+                      ---
+
+                      FRONTMATTER
+                        cat "$SOURCE" >> "$TMPFILE"
+                        cp "$TMPFILE" "$SOURCE"
+                      fi
+
+                      # Copy to target location
+                      mkdir -p "docs/${FOLDER}"
+                      cp "$SOURCE" "$TARGET_FILE"
+                      echo "Document prepared at: $TARGET_FILE ✓"
+
+              - step:
+                  type: Run
+                  name: Update Navigation
+                  identifier: update_navigation
+                  spec:
+                    shell: Bash
+                    command: |
+                      TARGET_FILE="<+steps.prepare_document.output.outputVariables.TARGET_FILE>"
+                      TITLE="<+pipeline.variables.document_title>"
+                      FOLDER="<+pipeline.variables.target_folder>"
+
+                      # Map folder to nav section name
+                      case "$FOLDER" in
+                        bvr) NAV_SECTION="Business Value Reviews" ;;
+                        iacm) NAV_SECTION="IaCM Documentation" ;;
+                        finops) NAV_SECTION="FinOps & CCM Reports" ;;
+                        best-practices) NAV_SECTION="Best Practices Library" ;;
+                      esac
+
+                      # Add to mkdocs.yml nav (before the Contributing section)
+                      python3 -c "
+                      import re, sys
+                      with open('mkdocs.yml', 'r') as f:
+                          content = f.read()
+
+                      new_entry = '      - \"${TITLE}\": ${TARGET_FILE}\n'
+                      marker = '      - How to Add'
+
+                      if '${TARGET_FILE}' in content:
+                          print('Entry already exists, skipping')
+                          sys.exit(0)
+
+                      # Find the right section and insert
+                      section_pattern = r'(  - ${NAV_SECTION}:.*?)(  - (?!.*${NAV_SECTION}))'
+                      updated = re.sub(
+                          r'(      - How to Add.*\n)',
+                          r'\1' + new_entry,
+                          content,
+                          count=1
+                      )
+                      with open('mkdocs.yml', 'w') as f:
+                          f.write(updated)
+                      print('Navigation updated ✓')
+                      "
+
+              - step:
+                  type: Run
+                  name: Open Pull Request
+                  identifier: open_pull_request
+                  spec:
+                    shell: Bash
+                    envVariables:
+                      GITHUB_TOKEN: <+secrets.getValue("github_pat")>
+                    command: |
+                      TARGET_FILE="<+steps.prepare_document.output.outputVariables.TARGET_FILE>"
+                      SLUG="<+steps.prepare_document.output.outputVariables.SLUG>"
+                      DATE="<+steps.prepare_document.output.outputVariables.DATE>"
+                      TITLE="<+pipeline.variables.document_title>"
+                      FOLDER="<+pipeline.variables.target_folder>"
+
+                      BRANCH="docs/${FOLDER}/${SLUG}-${DATE}"
+
+                      git config user.email "harness-agent@harness.io"
+                      git config user.name "Harness Agent"
+                      git checkout -b "$BRANCH"
+                      git add "$TARGET_FILE" mkdocs.yml
+                      git commit -m "docs(${FOLDER}): add ${TITLE}"
+
+                      git remote set-url origin "https://${GITHUB_TOKEN}@github.com/Samriddha11/claude-knowledge-base.git"
+                      git push origin "$BRANCH"
+
+                      # Create PR via GitHub API
+                      PR_RESPONSE=$(curl -s -X POST \
+                        "https://api.github.com/repos/Samriddha11/claude-knowledge-base/pulls" \
+                        -H "Authorization: token ${GITHUB_TOKEN}" \
+                        -H "Content-Type: application/json" \
+                        -d "{
+                          \"title\": \"docs(${FOLDER}): ${TITLE}\",
+                          \"body\": \"Auto-published by Harness Agent\\n\\n**Document:** ${TITLE}\\n**Category:** ${FOLDER}\\n**Generated:** $(date +'%B %d, %Y')\",
+                          \"head\": \"${BRANCH}\",
+                          \"base\": \"main\"
+                        }")
+
+                      PR_URL=$(echo "$PR_RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('html_url','N/A'))")
+                      echo "PR opened: $PR_URL"
+                      echo "PR_URL=${PR_URL}" >> $HARNESS_OUTPUT_FILE
+
+  variables:
+    - name: document_title
+      type: String
+      description: Human-readable title for the document
+      required: true
+      value: <+input>
+    - name: target_folder
+      type: String
+      description: "Target folder: bvr | iacm | finops | best-practices"
+      required: true
+      value: <+input>.selectOneFrom(bvr,iacm,finops,best-practices)
+    - name: artifact_path
+      type: String
+      description: Absolute path to the generated markdown file
+      required: true
+      value: <+input>
+
+  properties:
+    ci:
+      codebase:
+        connectorRef: samgithub
+        repoName: claude-knowledge-base
+        build: <+input>
